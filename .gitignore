@@ -43,3 +43,10 @@ out/
 
 ### STT Temp Outputs ###
 src/main/resources/tmp_gcs_out/
+
+### Optional local build scripts ###
+build.gradle
+settings.gradle
+gradlew
+gradlew.bat
+gradle/
