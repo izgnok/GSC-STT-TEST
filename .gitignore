@@ -40,3 +40,6 @@ out/
 .env
 .env.*
 !.env.example
+
+### STT Temp Outputs ###
+src/main/resources/tmp_gcs_out/
