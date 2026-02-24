@@ -1,0 +1,30 @@
+google:
+  stt:
+    projectId: sacred-vault-485600-a2
+    location: us
+    apiKeyPath: ${GOOGLE_STT_API_KEY_PATH:}
+    bucket: example_bucket1_kong
+
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  datasource:
+    url: jdbc:h2:mem:sttdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+
+openai:
+  api-key: ${OPENAI_API_KEY:}

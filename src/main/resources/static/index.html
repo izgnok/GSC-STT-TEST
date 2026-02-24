@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STT Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-1: #eef2ff;
+      --bg-2: #fff7ed;
+      --card: rgba(255, 255, 255, 0.88);
+      --line: #d7d9e5;
+      --ink: #171a27;
+      --muted: #5f657b;
+      --btn: #0f172a;
+      --btn-2: #ffffff;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 8% 10%, #c7d2fe 0, transparent 32%),
+        radial-gradient(circle at 92% 88%, #fde68a 0, transparent 26%),
+        linear-gradient(120deg, var(--bg-1), var(--bg-2));
+      color: var(--ink);
+      font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 28px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 16px 44px rgba(15, 23, 42, 0.09);
+      backdrop-filter: blur(8px);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 25px;
+      letter-spacing: -0.02em;
+    }
+
+    .sub {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .controls {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid #dfe5f3;
+      border-radius: 14px;
+      background: linear-gradient(140deg, #f8faff, #fff);
+    }
+
+    input[type="file"] {
+      width: 100%;
+      border: 1px dashed #a7b0c6;
+      border-radius: 10px;
+      padding: 12px;
+      background: #fff;
+      color: #2f374c;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 1px solid #0f172a;
+      background: var(--btn);
+      color: #fff;
+      padding: 11px 16px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+    }
+
+    button:not(:disabled):hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+    }
+
+    button.secondary {
+      background: var(--btn-2);
+      color: #0f172a;
+      border-color: #9ca3af;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .status {
+      color: #334155;
+      font-size: 13px;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      border: 1px solid #dbe2f2;
+      background: var(--accent-soft);
+      padding: 10px 12px;
+      border-radius: 10px;
+    }
+
+    .transcript-box {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      min-height: 280px;
+      max-height: 420px;
+      overflow: auto;
+      padding: 14px;
+      line-height: 1.6;
+      background: linear-gradient(180deg, #ffffff, #f8faff);
+      word-break: keep-all;
+      font-size: 17px;
+    }
+
+    .seg {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: start;
+      gap: 10px;
+      color: #8d96a9;
+      transition: color 80ms linear, background-color 80ms linear, border-color 80ms linear;
+      margin-bottom: 8px;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-left-width: 4px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .seg:hover {
+      border-color: #d9dfec;
+      background: #f8faff;
+    }
+
+    .seg.active {
+      color: #0f172a;
+      background: #e2e8f0;
+      border-color: #c7d2fe;
+    }
+
+    .seg.before {
+      color: #1f2937;
+      background: #f4f6fb;
+      border-color: #dbe1ed;
+    }
+
+    .seg.has-speaker {
+      border-left-color: var(--spk-border, #bfdbfe);
+    }
+
+    .seg .spk {
+      min-width: 68px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 3px 7px;
+      border-radius: 999px;
+      color: var(--spk-ink, #1e3a8a);
+      background: var(--spk-bg, #dbeafe);
+      border: 1px solid var(--spk-border, #bfdbfe);
+      margin-top: 1px;
+    }
+
+    .seg .spk.text {
+      color: #475569;
+      background: #e2e8f0;
+      border-color: #cbd5e1;
+    }
+
+    .seg .txt {
+      color: inherit;
+      font-weight: 500;
+      line-height: 1.65;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 4px;
+      border-radius: 10px;
+      filter: saturate(1.1);
+    }
+
+    @media (max-width: 700px) {
+      .wrap { margin: 14px auto; }
+      .card { padding: 16px; border-radius: 16px; }
+      h1 { font-size: 22px; }
+      .transcript-box { min-height: 240px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Audio Transcript Flow</h1>
+    <div class="sub">1) 음성파일 업로드 2) 종료(자동 처리 확인) 3) 오디오바 재생으로 대본 동기화</div>
+
+    <div class="controls">
+      <input id="audioFiles" type="file" multiple accept="audio/webm,.webm" />
+
+      <div class="buttons">
+        <button id="uploadBtn">음성파일 업로드</button>
+        <button id="completeBtn" class="secondary">종료</button>
+      </div>
+
+      <audio id="player" controls preload="metadata"></audio>
+      <div id="status" class="status">대기 중</div>
+    </div>
+
+    <div id="transcript" class="transcript-box">대본이 여기에 표시됩니다.</div>
+  </div>
+</div>
+
+<script>
+  const state = {
+    meetingId: null,
+    languageCode: "ko-KR",
+    chunkOrder: [],
+    cues: [],
+    mergedAudioUrl: null,
+    playing: false,
+    pollIntervalMs: 3000,
+    maxPoll: 40
+  };
+
+  const SPEAKER_PALETTE = [
+    { bg: "#fee2e2", border: "#fca5a5", ink: "#991b1b" },
+    { bg: "#dcfce7", border: "#86efac", ink: "#166534" },
+    { bg: "#dbeafe", border: "#93c5fd", ink: "#1d4ed8" },
+    { bg: "#fef3c7", border: "#fcd34d", ink: "#92400e" },
+    { bg: "#ede9fe", border: "#c4b5fd", ink: "#5b21b6" },
+    { bg: "#fce7f3", border: "#f9a8d4", ink: "#9d174d" },
+    { bg: "#cffafe", border: "#67e8f9", ink: "#155e75" },
+    { bg: "#ffedd5", border: "#fdba74", ink: "#9a3412" }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+  const transcriptEl = $("transcript");
+  const playerEl = $("player");
+
+  function setStatus(msg) {
+    statusEl.textContent = msg;
+  }
+
+  function setBusy(flag) {
+    ["uploadBtn", "completeBtn"].forEach(id => $(id).disabled = flag);
+  }
+
+  async function api(url, options = {}) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`${res.status} ${res.statusText}: ${txt}`);
+    }
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("application/json") ? res.json() : res.text();
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function readFileDurationMs(file) {
+    return new Promise((resolve, reject) => {
+      const audio = document.createElement("audio");
+      const url = URL.createObjectURL(file);
+      let done = false;
+
+      const resolveOnce = (value) => {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        resolve(value);
+      };
+      const rejectOnce = (message) => {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        reject(new Error(message));
+      };
+
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        const durationSec = audio.duration;
+        if (!Number.isFinite(durationSec) || durationSec <= 0) {
+          rejectOnce(`duration 읽기 실패: ${file.name}`);
+          return;
+        }
+        resolveOnce(Math.round(durationSec * 1000));
+      };
+      audio.onerror = () => rejectOnce(`audio 메타데이터 로딩 실패: ${file.name}`);
+      audio.src = url;
+    });
+  }
+
+  async function readDurationsMs(files) {
+    const out = [];
+    for (const file of files) {
+      out.push(await readFileDurationMs(file));
+    }
+    return out;
+  }
+
+  async function uploadFiles() {
+    const files = Array.from($("audioFiles").files || []);
+    if (!files.length) {
+      setStatus("업로드할 파일을 선택하세요.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      setStatus(state.meetingId
+        ? `업로드 중... meetingId=${state.meetingId}`
+        : "업로드 중... 신규 미팅 생성");
+      const durationsMs = await readDurationsMs(files);
+
+      const fd = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        fd.append("audioFiles", file);
+        fd.append("durationMs", String(durationsMs[i]));
+      }
+      fd.append("languageCode", state.languageCode);
+
+      // meetingId가 없으면 서버가 신규 미팅을 자동 생성한다.
+      // meetingId가 이미 있으면 기존 미팅에 청크를 이어서 붙인다.
+      const endpoint = state.meetingId
+        ? `/api/stt/meetings/${state.meetingId}/chunks/batch`
+        : "/api/stt/chunks/batch";
+      const rs = await api(endpoint, { method: "POST", body: fd });
+      state.meetingId = rs.meetingId;
+
+      setStatus(`업로드 완료. meetingId=${state.meetingId} / 종료 버튼을 눌러 대본 생성을 완료하세요.`);
+    } catch (e) {
+      setStatus(`업로드 실패: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function prepareMergedPlayerFromBackend() {
+    if (!state.meetingId) return;
+    setStatus("서버에서 병합 오디오 준비 중...");
+
+    if (state.mergedAudioUrl) {
+      URL.revokeObjectURL(state.mergedAudioUrl);
+      state.mergedAudioUrl = null;
+    }
+
+    const res = await fetch(`/api/stt/meetings/${state.meetingId}/audio/merged?t=${Date.now()}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`병합 오디오 조회 실패: ${res.status} ${res.statusText} ${text}`);
+    }
+
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) {
+      throw new Error("병합 오디오가 비어 있습니다.");
+    }
+
+    state.mergedAudioUrl = URL.createObjectURL(blob);
+    playerEl.src = state.mergedAudioUrl;
+    playerEl.load();
+  }
+
+  function getSpeakerTheme(speaker) {
+    if (!speaker) return null;
+    const raw = String(speaker).trim();
+    if (!raw) return null;
+
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0) {
+        return SPEAKER_PALETTE[n % SPEAKER_PALETTE.length];
+      }
+    }
+
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      hash = ((hash * 31) + raw.charCodeAt(i)) >>> 0;
+    }
+    return SPEAKER_PALETTE[hash % SPEAKER_PALETTE.length];
+  }
+
+  function renderTranscript(globalMs = null, forcedActiveIndex = -1) {
+    if (!state.cues.length) {
+      transcriptEl.textContent = "대본이 없습니다.";
+      return;
+    }
+
+    const escapeHtml = (s) => String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll("\"", "&quot;")
+      .replaceAll("'", "&#39;");
+
+    const cueLabel = (cue) => {
+      const text = String(cue?.text || "").trim();
+      const speaker = String(cue?.speaker || "").trim() || "0";
+      return {
+        text: escapeHtml(text),
+        speakerKey: speaker,
+        speaker: `SPEAKER_${escapeHtml(speaker)}`
+      };
+    };
+
+    transcriptEl.innerHTML = state.cues.map((cue, idx) => {
+      const label = cueLabel(cue);
+      const theme = getSpeakerTheme(label.speakerKey);
+      const styleAttr = theme
+        ? ` style="--spk-bg:${theme.bg};--spk-border:${theme.border};--spk-ink:${theme.ink};"`
+        : "";
+
+      const isActive = forcedActiveIndex >= 0
+        ? idx === forcedActiveIndex
+        : (globalMs != null && globalMs >= cue.startMs && globalMs <= cue.endMs);
+
+      const isBefore = forcedActiveIndex >= 0
+        ? idx < forcedActiveIndex
+        : (globalMs != null && globalMs > cue.endMs);
+
+      const classes = [
+        "seg",
+        isActive ? "active" : "",
+        !isActive && isBefore ? "before" : "",
+        "has-speaker"
+      ].filter(Boolean).join(" ");
+
+      const speakerHtml = `<span class="spk">${label.speaker}</span>`;
+
+      return `<div class="${classes}" data-cue-index="${idx}"${styleAttr}>${speakerHtml}<span class="txt">${label.text}</span></div>`;
+    }).join("");
+  }
+
+  async function completeAndPoll() {
+    if (!state.meetingId) {
+      setStatus("먼저 음성파일을 업로드하세요.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      for (let i = 1; i <= state.maxPoll; i++) {
+        const rs = await api(`/api/stt/meetings/${state.meetingId}/snapshot?poll=true`);
+        state.chunkOrder = (rs.chunks || []).map(c => c.chunkSeq).sort((a, b) => a - b);
+        state.cues = (rs.cues || []).slice().sort((a, b) => a.startMs - b.startMs);
+        renderTranscript(state.playing ? getGlobalTimeMs() : null);
+
+        setStatus(`대본 생성 확인 중... (${i}/${state.maxPoll}) ${rs.status}`);
+
+        if (rs.status === "DONE") {
+          await prepareMergedPlayerFromBackend();
+          setStatus("대본 생성 완료. 오디오바 재생 버튼을 누르세요.");
+          return;
+        }
+
+        await sleep(state.pollIntervalMs);
+      }
+
+      setStatus("아직 처리 중입니다. 잠시 후 종료 버튼을 다시 눌러주세요.");
+    } catch (e) {
+      setStatus(`종료 처리 실패: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function getGlobalTimeMs() {
+    return Math.floor(playerEl.currentTime * 1000);
+  }
+
+  function startPlaybackByAudioControl() {
+    if (!state.chunkOrder.length || !state.cues.length) {
+      setStatus("먼저 종료 버튼으로 대본 생성이 완료되어야 합니다.");
+      return;
+    }
+
+    if (state.playing) {
+      return;
+    }
+
+    state.playing = true;
+    renderTranscript(getGlobalTimeMs());
+    if (!playerEl.src) {
+      setStatus("병합 오디오가 준비되지 않았습니다. 종료 버튼을 다시 눌러주세요.");
+      state.playing = false;
+      return;
+    }
+    setStatus("재생 중... 대본 하이라이트가 음성에 맞춰 이동합니다.");
+  }
+
+  playerEl.addEventListener("timeupdate", () => {
+    if (!state.playing) return;
+    const globalMs = getGlobalTimeMs();
+    renderTranscript(globalMs);
+  });
+
+  playerEl.addEventListener("ended", () => {
+    state.playing = false;
+    renderTranscript(Number.MAX_SAFE_INTEGER);
+    setStatus("재생 완료");
+  });
+  playerEl.addEventListener("pause", () => {
+    renderTranscript(getGlobalTimeMs());
+  });
+  playerEl.addEventListener("play", () => {
+    if (!state.playing) {
+      startPlaybackByAudioControl();
+    }
+  });
+
+  // 대본 문구 클릭 시 해당 구간으로 즉시 이동/재생
+  transcriptEl.addEventListener("click", (e) => {
+    const seg = e.target.closest("[data-cue-index]");
+    if (!seg) return;
+
+    const idx = Number(seg.dataset.cueIndex);
+    const cue = state.cues[idx];
+    if (!cue) return;
+    if (!playerEl.src) {
+      setStatus("병합 오디오가 준비되지 않았습니다. 종료 버튼을 먼저 눌러주세요.");
+      return;
+    }
+
+    playerEl.currentTime = cue.startMs / 1000;
+    state.playing = true;
+    renderTranscript(cue.startMs, idx);
+    playerEl.play().catch(() => {});
+    setStatus("재생 중... 클릭한 대본 구간으로 이동했습니다.");
+  });
+
+  $("uploadBtn").addEventListener("click", uploadFiles);
+  $("completeBtn").addEventListener("click", completeAndPoll);
+</script>
+</body>
+</html>
