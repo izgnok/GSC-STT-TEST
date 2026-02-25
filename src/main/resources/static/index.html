@@ -290,47 +290,6 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async function readFileDurationMs(file) {
-    return new Promise((resolve, reject) => {
-      const audio = document.createElement("audio");
-      const url = URL.createObjectURL(file);
-      let done = false;
-
-      const resolveOnce = (value) => {
-        if (done) return;
-        done = true;
-        URL.revokeObjectURL(url);
-        resolve(value);
-      };
-      const rejectOnce = (message) => {
-        if (done) return;
-        done = true;
-        URL.revokeObjectURL(url);
-        reject(new Error(message));
-      };
-
-      audio.preload = "metadata";
-      audio.onloadedmetadata = () => {
-        const durationSec = audio.duration;
-        if (!Number.isFinite(durationSec) || durationSec <= 0) {
-          rejectOnce(`duration 읽기 실패: ${file.name}`);
-          return;
-        }
-        resolveOnce(Math.round(durationSec * 1000));
-      };
-      audio.onerror = () => rejectOnce(`audio 메타데이터 로딩 실패: ${file.name}`);
-      audio.src = url;
-    });
-  }
-
-  async function readDurationsMs(files) {
-    const out = [];
-    for (const file of files) {
-      out.push(await readFileDurationMs(file));
-    }
-    return out;
-  }
-
   async function uploadFiles() {
     const files = Array.from($("audioFiles").files || []);
     if (!files.length) {
@@ -343,13 +302,9 @@
       setStatus(state.meetingId
         ? `업로드 중... meetingId=${state.meetingId}`
         : "업로드 중... 신규 미팅 생성");
-      const durationsMs = await readDurationsMs(files);
-
       const fd = new FormData();
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
+      for (const file of files) {
         fd.append("audioFiles", file);
-        fd.append("durationMs", String(durationsMs[i]));
       }
       fd.append("languageCode", state.languageCode);
 

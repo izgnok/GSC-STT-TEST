@@ -27,10 +27,9 @@ public class SttController {
     @PostMapping("/chunks")
     public ChunkUploadAutoRs uploadChunkNewMeeting(
         @RequestParam MultipartFile audioFile,
-        @RequestParam Long durationMs,
         @RequestParam(defaultValue = "ko-KR") String languageCode
     ) throws Exception {
-        return sttService.uploadChunkAutoSeqNewMeeting(audioFile, languageCode, durationMs);
+        return sttService.uploadChunkAutoSeqNewMeeting(audioFile, languageCode);
     }
 
     /**
@@ -39,10 +38,9 @@ public class SttController {
     @PostMapping("/chunks/batch")
     public ChunkBatchUploadRs uploadChunksNewMeeting(
         @RequestParam List<MultipartFile> audioFiles,
-        @RequestParam List<Long> durationMs,
         @RequestParam(defaultValue = "ko-KR") String languageCode
     ) throws Exception {
-        return sttService.uploadChunksAutoSeqNewMeeting(audioFiles, languageCode, durationMs);
+        return sttService.uploadChunksAutoSeqNewMeeting(audioFiles, languageCode);
     }
 
     /**
@@ -52,10 +50,9 @@ public class SttController {
     public ChunkUploadAutoRs uploadChunkAuto(
         @PathVariable Long meetingId,
         @RequestParam MultipartFile audioFile,
-        @RequestParam Long durationMs,
         @RequestParam(defaultValue = "ko-KR") String languageCode
     ) throws Exception {
-        return sttService.uploadChunkAutoSeq(meetingId, audioFile, languageCode, durationMs);
+        return sttService.uploadChunkAutoSeq(meetingId, audioFile, languageCode);
     }
 
     /**
@@ -65,10 +62,9 @@ public class SttController {
     public ChunkBatchUploadRs uploadChunksAuto(
         @PathVariable Long meetingId,
         @RequestParam List<MultipartFile> audioFiles,
-        @RequestParam List<Long> durationMs,
         @RequestParam(defaultValue = "ko-KR") String languageCode
     ) throws Exception {
-        return sttService.uploadChunksAutoSeq(meetingId, audioFiles, languageCode, durationMs);
+        return sttService.uploadChunksAutoSeq(meetingId, audioFiles, languageCode);
     }
 
     /**

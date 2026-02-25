@@ -40,6 +40,7 @@ public class SttService {
     private final AiMeetingSttStateRepository sttStateRepository;
     private final AiMeetingSttChunkCueRepository chunkCueRepository;
     private final GoogleSttService googleSttService;
+    private final AudioDurationProbeService audioDurationProbeService;
     private final MeetingAudioMergeService meetingAudioMergeService;
 
     /**
@@ -50,10 +51,9 @@ public class SttService {
      */
     @Transactional
     public ChunkUploadAutoRs uploadChunkAutoSeqNewMeeting(MultipartFile audioFile,
-                                                          String languageCode,
-                                                          Long durationMs) throws Exception {
+                                                          String languageCode) throws Exception {
         Long meetingId = generateMeetingId();
-        return uploadChunkAutoSeq(meetingId, audioFile, languageCode, durationMs);
+        return uploadChunkAutoSeq(meetingId, audioFile, languageCode);
     }
 
     /**
@@ -61,10 +61,9 @@ public class SttService {
      */
     @Transactional
     public ChunkBatchUploadRs uploadChunksAutoSeqNewMeeting(List<MultipartFile> audioFiles,
-                                                            String languageCode,
-                                                            List<Long> durationMsList) throws Exception {
+                                                            String languageCode) throws Exception {
         Long meetingId = generateMeetingId();
-        return uploadChunksAutoSeq(meetingId, audioFiles, languageCode, durationMsList);
+        return uploadChunksAutoSeq(meetingId, audioFiles, languageCode);
     }
 
     /**
@@ -73,13 +72,12 @@ public class SttService {
     @Transactional
     public ChunkUploadAutoRs uploadChunkAutoSeq(Long meetingId,
                                                 MultipartFile audioFile,
-                                                String languageCode,
-                                                Long durationMs) throws Exception {
+                                                String languageCode) throws Exception {
         int nextChunkSeq = sttStateRepository.findTopByMeetingIdOrderByChunkSeqDesc(meetingId)
                                              .map(s -> s.getChunkSeq() + 1)
                                              .orElse(1);
 
-        ChunkUploadRs rs = uploadChunk(meetingId, nextChunkSeq, audioFile, languageCode, durationMs);
+        ChunkUploadRs rs = uploadChunk(meetingId, nextChunkSeq, audioFile, languageCode);
         return new ChunkUploadAutoRs(rs.getMeetingId(), rs.getChunkSeq(), rs.getJobId(), rs.getGcsUri());
     }
 
@@ -89,20 +87,11 @@ public class SttService {
     @Transactional
     public ChunkBatchUploadRs uploadChunksAutoSeq(Long meetingId,
                                                   List<MultipartFile> audioFiles,
-                                                  String languageCode,
-                                                  List<Long> durationMsList) throws Exception {
-        if (durationMsList.size() != audioFiles.size()) {
-            throw new IllegalArgumentException(
-                "durationMs count mismatch. audioFiles=%d, durationMs=%d".formatted(audioFiles.size(), durationMsList.size())
-            );
-        }
-
+                                                  String languageCode) throws Exception {
         List<ChunkUploadAutoRs> out = new ArrayList<>();
 
-        for (int i = 0; i < audioFiles.size(); i++) {
-            MultipartFile audioFile = audioFiles.get(i);
-            Long durationMs = durationMsList.get(i);
-            out.add(uploadChunkAutoSeq(meetingId, audioFile, languageCode, durationMs));
+        for (MultipartFile audioFile : audioFiles) {
+            out.add(uploadChunkAutoSeq(meetingId, audioFile, languageCode));
         }
 
         return new ChunkBatchUploadRs(meetingId, out.size(), out);
@@ -117,16 +106,10 @@ public class SttService {
     public ChunkUploadRs uploadChunk(Long meetingId,
                                      Integer chunkSeq,
                                      MultipartFile audioFile,
-                                     String languageCode,
-                                     Long durationMs) throws Exception {
-        if (durationMs == null || durationMs <= 0L) {
-            throw new IllegalArgumentException(
-                "durationMs is required and must be > 0. meetingId=%d, chunkSeq=%d".formatted(meetingId, chunkSeq)
-            );
-        }
-
+                                     String languageCode) throws Exception {
         String today = LocalDate.now().format(DATE_FORMAT);
         String objectName = "%s/meet_%s/in/chunk_%d.webm".formatted(today, meetingId, chunkSeq);
+        long probedDurationMs = audioDurationProbeService.probeWebmDurationMs(audioFile);
 
         String gcsUri = googleSttService.uploadToGcs(audioFile, objectName);
         String jobId = googleSttService.startSttJob(gcsUri, languageCode, today, meetingId);
@@ -136,7 +119,7 @@ public class SttService {
                                                       .chunkSeq(chunkSeq)
                                                       .gcsUri(gcsUri)
                                                       .jobId(jobId)
-                                                      .durationMs(durationMs)
+                                                      .durationMs(probedDurationMs)
                                                       .status(ChunkStatus.PROCESSING)
                                                       .languageCode(languageCode)
                                                       .createdDate(LocalDate.now())
