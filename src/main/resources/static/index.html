@@ -257,7 +257,7 @@
     pollIntervalMs: 3000,
     maxPoll: 40,
     autoScrollEnabled: true,
-    suppressTranscriptScrollEvent: false,
+    suppressTranscriptScrollUntilMs: 0,
     lastAutoScrolledCueIndex: -1
   };
 
@@ -396,16 +396,18 @@
     return state.cues.length - 1;
   }
 
-  function focusCueByIndex(index, behavior = "smooth") {
+  function lockTranscriptScrollEvents(lockMs) {
+    state.suppressTranscriptScrollUntilMs = Date.now() + lockMs;
+  }
+
+  function focusCueByIndex(index, behavior = "auto", lockMs = 300) {
     if (index < 0) return;
     const target = transcriptEl.querySelector(`[data-cue-index="${index}"]`);
     if (!target) return;
 
-    state.suppressTranscriptScrollEvent = true;
+    // scrollIntoView가 발생시키는 scroll 이벤트는 사용자 스크롤로 처리하지 않도록 잠깐 무시한다.
+    lockTranscriptScrollEvents(lockMs);
     target.scrollIntoView({ behavior, block: "center", inline: "nearest" });
-    window.setTimeout(() => {
-      state.suppressTranscriptScrollEvent = false;
-    }, 220);
   }
 
   function focusCurrentCueAndEnableAutoScroll(showStatus = true) {
@@ -418,7 +420,7 @@
     const idx = getActiveCueIndex(globalMs);
     state.autoScrollEnabled = true;
     renderTranscript(globalMs, idx);
-    focusCueByIndex(idx, "smooth");
+    focusCueByIndex(idx, "smooth", 1000);
     state.lastAutoScrolledCueIndex = idx;
     updateFocusButtonState();
 
@@ -533,7 +535,7 @@
     const idx = getActiveCueIndex(globalMs);
     renderTranscript(globalMs);
     if (state.autoScrollEnabled) {
-      focusCueByIndex(idx, "smooth");
+      focusCueByIndex(idx, "auto", 250);
       state.lastAutoScrolledCueIndex = idx;
     }
     if (!playerEl.src) {
@@ -550,7 +552,7 @@
     renderTranscript(globalMs);
     const activeIdx = getActiveCueIndex(globalMs);
     if (state.autoScrollEnabled && activeIdx !== state.lastAutoScrolledCueIndex) {
-      focusCueByIndex(activeIdx, "smooth");
+      focusCueByIndex(activeIdx, "auto", 250);
       state.lastAutoScrolledCueIndex = activeIdx;
     }
   });
@@ -574,7 +576,7 @@
   });
 
   transcriptEl.addEventListener("scroll", () => {
-    if (state.suppressTranscriptScrollEvent) return;
+    if (Date.now() <= state.suppressTranscriptScrollUntilMs) return;
     if (!state.autoScrollEnabled) return;
     state.autoScrollEnabled = false;
     updateFocusButtonState();
@@ -598,7 +600,7 @@
     state.playing = true;
     state.autoScrollEnabled = true;
     renderTranscript(cue.startMs, idx);
-    focusCueByIndex(idx, "smooth");
+    focusCueByIndex(idx, "smooth", 1000);
     state.lastAutoScrolledCueIndex = idx;
     updateFocusButtonState();
     playerEl.play().catch(() => {});
