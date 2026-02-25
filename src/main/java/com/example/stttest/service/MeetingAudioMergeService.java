@@ -84,12 +84,12 @@ public class MeetingAudioMergeService {
                 inputFiles.add(localFile);
             }
 
-            Path merged = tempDir.resolve("meeting_" + meetingId + "_merged.m4a");
-            runFfmpegConcat(inputFiles, merged);
+            Path merged = tempDir.resolve("meeting_" + meetingId + "_merged.webm");
+            runFfmpegConcatWebm(inputFiles, tempDir.resolve("concat-inputs.txt"), merged);
 
             return new AudioDownloadDto(
-                "meeting_" + meetingId + "_merged.m4a",
-                "audio/mp4",
+                "meeting_" + meetingId + "_merged.webm",
+                "audio/webm",
                 Files.readAllBytes(merged)
             );
         } finally {
@@ -97,26 +97,34 @@ public class MeetingAudioMergeService {
         }
     }
 
-    private void runFfmpegConcat(List<Path> inputFiles, Path outputFile) throws Exception {
+    /**
+     * concat demuxer + stream copy로 병합한다.
+     *
+     * - 재인코딩을 피해서 청크 경계 지연/패딩 누적 가능성을 줄인다.
+     * - 입력은 동일 코덱(webm/opus)이라는 전제에서 동작한다.
+     */
+    private void runFfmpegConcatWebm(List<Path> inputFiles, Path concatListFile, Path outputFile) throws Exception {
+        StringBuilder listText = new StringBuilder();
+        for (Path input : inputFiles) {
+            listText.append("file '")
+                    .append(input.toAbsolutePath().toString().replace("'", "'\\''"))
+                    .append("'\n");
+        }
+        Files.writeString(concatListFile, listText.toString(), StandardCharsets.UTF_8);
+
         List<String> command = new ArrayList<>();
         command.add("ffmpeg");
         command.add("-y");
-
-        for (Path input : inputFiles) {
-            command.add("-i");
-            command.add(input.toAbsolutePath().toString());
-        }
-
-        command.add("-filter_complex");
-        command.add("concat=n=%d:v=0:a=1[outa]".formatted(inputFiles.size()));
-        command.add("-map");
-        command.add("[outa]");
-        command.add("-c:a");
-        command.add("aac");
-        command.add("-b:a");
-        command.add("128k");
-        command.add("-movflags");
-        command.add("+faststart");
+        command.add("-f");
+        command.add("concat");
+        command.add("-safe");
+        command.add("0");
+        command.add("-i");
+        command.add(concatListFile.toAbsolutePath().toString());
+        command.add("-c");
+        command.add("copy");
+        command.add("-fflags");
+        command.add("+genpts");
         command.add(outputFile.toAbsolutePath().toString());
 
         Process process = new ProcessBuilder(command)
