@@ -20,10 +20,12 @@ public class AudioDurationProbeService {
      * 청크 누적 오프셋이 병합 오디오 타임라인과 최대한 일치한다.
      */
     public long probeWebmDurationMs(MultipartFile audioFile) throws Exception {
+        // ffprobe는 파일 경로 입력을 받으므로 Multipart를 임시 파일로 저장한다.
         Path tempFile = Files.createTempFile("stt-chunk-", ".webm");
         try {
             audioFile.transferTo(tempFile);
 
+            // ffprobe 출력은 "초(double)" 단일 라인으로 받는다.
             List<String> command = List.of(
                 "ffprobe",
                 "-v", "error",
@@ -36,12 +38,14 @@ public class AudioDurationProbeService {
                 .redirectErrorStream(true)
                 .start();
 
+            // stdout/err를 합쳐 읽고 종료 코드를 검증한다.
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new IllegalStateException("ffprobe failed. exitCode=%d, output=%s".formatted(exitCode, output));
             }
 
+            // 초 -> ms 반올림 변환.
             double seconds = Double.parseDouble(output);
             long durationMs = Math.round(seconds * 1000d);
             if (durationMs <= 0L) {
@@ -50,6 +54,7 @@ public class AudioDurationProbeService {
             return durationMs;
         } finally {
             try {
+                // 임시 파일은 성공/실패와 무관하게 정리한다.
                 Files.deleteIfExists(tempFile);
             } catch (Exception e) {
                 log.warn("temp file cleanup failed: {}", tempFile, e);
@@ -57,4 +62,3 @@ public class AudioDurationProbeService {
         }
     }
 }
-

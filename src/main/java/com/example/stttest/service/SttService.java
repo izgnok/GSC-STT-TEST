@@ -35,6 +35,10 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class SttService {
 
+    /**
+     * GCS object 경로 날짜 포맷.
+     * 예: 2026-02-25/meet_123/in/chunk_1.webm
+     */
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final AiMeetingSttStateRepository sttStateRepository;
@@ -52,6 +56,7 @@ public class SttService {
     @Transactional
     public ChunkUploadAutoRs uploadChunkAutoSeqNewMeeting(MultipartFile audioFile,
                                                           String languageCode) throws Exception {
+        // 업로드 요청 자체를 미팅 시작으로 보고 meetingId를 즉시 발급한다.
         Long meetingId = generateMeetingId();
         return uploadChunkAutoSeq(meetingId, audioFile, languageCode);
     }
@@ -62,6 +67,7 @@ public class SttService {
     @Transactional
     public ChunkBatchUploadRs uploadChunksAutoSeqNewMeeting(List<MultipartFile> audioFiles,
                                                             String languageCode) throws Exception {
+        // 배치 업로드도 동일하게 첫 요청 시 meetingId를 발급해 묶는다.
         Long meetingId = generateMeetingId();
         return uploadChunksAutoSeq(meetingId, audioFiles, languageCode);
     }
@@ -73,10 +79,13 @@ public class SttService {
     public ChunkUploadAutoRs uploadChunkAutoSeq(Long meetingId,
                                                 MultipartFile audioFile,
                                                 String languageCode) throws Exception {
+        // 같은 meetingId에서 가장 마지막 chunkSeq를 조회해 다음 순번을 계산한다.
+        // 데이터가 하나도 없으면 첫 청크이므로 1부터 시작한다.
         int nextChunkSeq = sttStateRepository.findTopByMeetingIdOrderByChunkSeqDesc(meetingId)
                                              .map(s -> s.getChunkSeq() + 1)
                                              .orElse(1);
 
+        // 실 업로드/작업 생성은 공통 메서드에 위임한다.
         ChunkUploadRs rs = uploadChunk(meetingId, nextChunkSeq, audioFile, languageCode);
         return new ChunkUploadAutoRs(rs.getMeetingId(), rs.getChunkSeq(), rs.getJobId(), rs.getGcsUri());
     }
@@ -90,6 +99,7 @@ public class SttService {
                                                   String languageCode) throws Exception {
         List<ChunkUploadAutoRs> out = new ArrayList<>();
 
+        // 입력 리스트 순서를 그대로 유지해야 청크 순번/재생 순서가 일치한다.
         for (MultipartFile audioFile : audioFiles) {
             out.add(uploadChunkAutoSeq(meetingId, audioFile, languageCode));
         }
@@ -107,13 +117,20 @@ public class SttService {
                                      Integer chunkSeq,
                                      MultipartFile audioFile,
                                      String languageCode) throws Exception {
+        // out/in 경로를 날짜 단위 prefix로 묶어 운영 시 정리/조회가 쉽도록 구성한다.
         String today = LocalDate.now().format(DATE_FORMAT);
         String objectName = "%s/meet_%s/in/chunk_%d.webm".formatted(today, meetingId, chunkSeq);
+
+        // 자막 글로벌 오프셋 계산의 기준값은 서버(ffprobe) 측정 duration을 사용한다.
+        // 프론트 메타데이터 값을 신뢰하면 누적 오차가 커질 수 있다.
         long probedDurationMs = audioDurationProbeService.probeWebmDurationMs(audioFile);
 
+        // 1) 원본 청크 업로드
         String gcsUri = googleSttService.uploadToGcs(audioFile, objectName);
+        // 2) 해당 청크에 대한 STT 비동기 작업 시작
         String jobId = googleSttService.startSttJob(gcsUri, languageCode, today, meetingId);
 
+        // 3) 청크 상태를 DB에 PROCESSING으로 저장해 폴링 대상에 포함시킨다.
         AiMeetingSttState sttState = AiMeetingSttState.builder()
                                                       .meetingId(meetingId)
                                                       .chunkSeq(chunkSeq)
@@ -141,17 +158,21 @@ public class SttService {
     public MeetingCompleteRs completeMeeting(Long meetingId) throws Exception {
         List<AiMeetingSttState> sttStates = sttStateRepository.findByMeetingIdOrderByChunkSeqAsc(meetingId);
         if (sttStates.isEmpty()) {
+            // 아직 업로드된 청크가 없으면 기다림 상태를 반환한다.
             return MeetingCompleteRs.wait(meetingId);
         }
 
         for (AiMeetingSttState sttState : sttStates) {
             if (sttState.getStatus() == ChunkStatus.DONE) {
+                // 이미 완료된 청크는 재처리하지 않는다.
                 continue;
             }
 
+            // Google long-running operation 상태를 조회한다.
             SttJobResultDto result = googleSttService.checkSttJobStatus(sttState.getJobId());
             switch (result.getStatus()) {
                 case DONE -> {
+                    // 완료 시 transcript + cue를 저장하고 상태를 DONE으로 고정한다.
                     sttState.setStatus(ChunkStatus.DONE);
                     sttState.setTranscript(result.getTranscript());
                     sttState.setErrorMessage(null);
@@ -159,6 +180,7 @@ public class SttService {
                     log.info("청크 처리 완료: meetingId={}, chunkSeq={}", meetingId, sttState.getChunkSeq());
                 }
                 case ERROR -> {
+                    // 실패한 청크는 같은 입력 GCS URI로 job을 재등록한다.
                     String languageCode = (sttState.getLanguageCode() == null || sttState.getLanguageCode().isBlank())
                                           ? "ko-KR"
                                           : sttState.getLanguageCode();
@@ -166,6 +188,8 @@ public class SttService {
                     String today = sttState.getCreatedDate().format(DATE_FORMAT);
                     String newJobId = googleSttService.startSttJob(sttState.getGcsUri(), languageCode, today, meetingId);
 
+                    // 상태를 PROCESSING으로 되돌리고 바로 WAIT를 반환한다.
+                    // 한 번의 요청에서 무한 재시작 루프를 만들지 않기 위함이다.
                     sttState.setJobId(newJobId);
                     sttState.setStatus(ChunkStatus.PROCESSING);
                     sttState.setErrorMessage(result.getErrorMessage());
@@ -175,6 +199,7 @@ public class SttService {
                     return MeetingCompleteRs.wait(meetingId);
                 }
                 case PROCESSING -> {
+                    // 하나라도 진행 중이면 미팅 전체 완료가 아니므로 즉시 WAIT 반환.
                     log.info("청크 처리 중: meetingId={}, chunkSeq={}", meetingId, sttState.getChunkSeq());
                     return MeetingCompleteRs.wait(meetingId);
                 }
@@ -198,6 +223,7 @@ public class SttService {
         int completedChunks = 0;
 
         for (AiMeetingSttState sttState : sttStates) {
+            // DONE + transcript 존재 조건을 만족하는 청크만 병합한다.
             if (sttState.getStatus() == ChunkStatus.DONE && sttState.getTranscript() != null) {
                 if (!fullTranscript.isEmpty()) {
                     fullTranscript.append('\n');
@@ -225,17 +251,20 @@ public class SttService {
         }
 
         int completedChunks = 0;
+        // 앞 청크의 실제 길이를 누적해 "회의 전체 타임라인" 오프셋을 만든다.
         long runningOffsetMs = 0L;
         List<SubtitleCueRs> cues = new ArrayList<>();
 
         for (AiMeetingSttState sttState : sttStates) {
             if (sttState.getStatus() != ChunkStatus.DONE) {
+                // 완료되지 않은 청크 cue는 아직 글로벌 타임라인에 포함하지 않는다.
                 continue;
             }
             completedChunks++;
 
             List<SubtitleCueRs> chunkCues = readChunkCues(sttState);
             for (SubtitleCueRs cue : chunkCues) {
+                // chunk 로컬 시간(start/end)에 누적 오프셋을 더해 글로벌 시간으로 변환한다.
                 cues.add(new SubtitleCueRs(
                     sttState.getChunkSeq(),
                     cue.getStartMs() + runningOffsetMs,
@@ -245,6 +274,7 @@ public class SttService {
                 ));
             }
 
+            // 다음 청크 보정값을 위해 현재 청크 실제 길이를 누적한다.
             runningOffsetMs += resolveChunkDurationMs(sttState);
         }
 
@@ -268,6 +298,8 @@ public class SttService {
                 completed++;
             }
 
+            // 클라이언트는 chunk마다 같은 merged audio endpoint를 사용한다.
+            // 실제 재생은 청크 개별 파일이 아닌 병합 파일 기준으로 이뤄진다.
             chunks.add(new MeetingChunkRs(
                 sttState.getChunkSeq(),
                 sttState.getStatus(),
@@ -287,8 +319,10 @@ public class SttService {
     public MeetingSnapshotRs getMeetingSnapshot(Long meetingId, boolean poll) throws Exception {
         String status;
         if (poll) {
+            // poll=true면 먼저 completeMeeting을 실행해 상태를 최신화한다.
             status = completeMeeting(meetingId).getStatus();
         } else {
+            // poll=false면 조회만 수행하고, 현재 완료율로 상태를 계산한다.
             MeetingChunksRs chunksRs = getMeetingChunks(meetingId);
             boolean allDone = chunksRs.getTotalChunks() > 0
                               && chunksRs.getTotalChunks().equals(chunksRs.getCompletedChunks());
@@ -322,9 +356,11 @@ public class SttService {
             return;
         }
 
+        // 같은 chunkId에 대해 재저장될 수 있으므로 기존 cue를 먼저 삭제한다.
         chunkCueRepository.deleteByChunkId(sttState.getId());
 
         if (cues == null || cues.isEmpty()) {
+            // transcript만 있고 cue가 비어있는 경우를 허용한다.
             return;
         }
 
@@ -332,6 +368,7 @@ public class SttService {
         int cueIndex = 1;
 
         for (SttCueDto cue : cues) {
+            // cue_index는 정렬 보장을 위한 순차 번호다.
             rows.add(AiMeetingSttChunkCue.builder()
                                          .meetingId(sttState.getMeetingId())
                                          .chunkId(sttState.getId())
@@ -352,6 +389,7 @@ public class SttService {
             return List.of();
         }
 
+        // cue_index asc로 읽어 저장 순서를 그대로 유지한다.
         List<AiMeetingSttChunkCue> rows = chunkCueRepository.findByChunkIdOrderByCueIndexAsc(sttState.getId());
         if (rows.isEmpty()) {
             return List.of();
@@ -360,6 +398,7 @@ public class SttService {
         List<SubtitleCueRs> cues = new ArrayList<>(rows.size());
         for (AiMeetingSttChunkCue row : rows) {
             if (row == null || row.getStartMs() == null || row.getEndMs() == null) {
+                // 비정상 row는 제외하고 나머지만 반환한다.
                 continue;
             }
             cues.add(new SubtitleCueRs(
@@ -375,6 +414,7 @@ public class SttService {
 
     private long resolveChunkDurationMs(AiMeetingSttState sttState) {
         if (sttState.getDurationMs() == null || sttState.getDurationMs() <= 0L) {
+            // 글로벌 타임라인 계산의 필수값이므로 누락 시 즉시 실패시킨다.
             throw new IllegalStateException(
                 "durationMs is required. meetingId=%d, chunkSeq=%d"
                     .formatted(sttState.getMeetingId(), sttState.getChunkSeq())
@@ -387,6 +427,8 @@ public class SttService {
      * 외부 미팅 서버 없이도 충돌 확률을 낮추기 위한 로컬 meetingId 생성 규칙.
      */
     private Long generateMeetingId() {
+        // ms timestamp(13자리) * 1000 + 난수(0~999) 조합.
+        // 단일 인스턴스 환경에서 충돌 확률을 낮추는 용도다.
         return System.currentTimeMillis() * 1000L + ThreadLocalRandom.current().nextInt(1000);
     }
 }
