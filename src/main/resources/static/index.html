@@ -109,6 +109,11 @@
       color: #0f172a;
       border-color: #9ca3af;
     }
+    button.secondary.on {
+      background: #0f172a;
+      color: #ffffff;
+      border-color: #0f172a;
+    }
 
     button:disabled {
       opacity: 0.45;
@@ -230,6 +235,7 @@
       <div class="buttons">
         <button id="uploadBtn">음성파일 업로드</button>
         <button id="completeBtn" class="secondary">종료</button>
+        <button id="focusBtn" class="secondary">현재 자막 포커스</button>
       </div>
 
       <audio id="player" controls preload="metadata"></audio>
@@ -249,7 +255,10 @@
     mergedAudioUrl: null,
     playing: false,
     pollIntervalMs: 3000,
-    maxPoll: 40
+    maxPoll: 40,
+    autoScrollEnabled: true,
+    suppressTranscriptScrollEvent: false,
+    lastAutoScrolledCueIndex: -1
   };
 
   const SPEAKER_PALETTE = [
@@ -267,6 +276,7 @@
   const statusEl = $("status");
   const transcriptEl = $("transcript");
   const playerEl = $("player");
+  const focusBtn = $("focusBtn");
 
   function setStatus(msg) {
     statusEl.textContent = msg;
@@ -274,6 +284,12 @@
 
   function setBusy(flag) {
     ["uploadBtn", "completeBtn"].forEach(id => $(id).disabled = flag);
+  }
+
+  function updateFocusButtonState() {
+    const hasCues = state.cues.length > 0;
+    focusBtn.disabled = !hasCues;
+    focusBtn.classList.toggle("on", hasCues && state.autoScrollEnabled);
   }
 
   async function api(url, options = {}) {
@@ -368,9 +384,53 @@
     return SPEAKER_PALETTE[hash % SPEAKER_PALETTE.length];
   }
 
+  function getActiveCueIndex(globalMs) {
+    if (!state.cues.length) return -1;
+    if (globalMs <= state.cues[0].startMs) return 0;
+
+    for (let i = 0; i < state.cues.length; i++) {
+      const cue = state.cues[i];
+      if (globalMs >= cue.startMs && globalMs <= cue.endMs) return i;
+      if (globalMs < cue.startMs) return Math.max(0, i - 1);
+    }
+    return state.cues.length - 1;
+  }
+
+  function focusCueByIndex(index, behavior = "smooth") {
+    if (index < 0) return;
+    const target = transcriptEl.querySelector(`[data-cue-index="${index}"]`);
+    if (!target) return;
+
+    state.suppressTranscriptScrollEvent = true;
+    target.scrollIntoView({ behavior, block: "center", inline: "nearest" });
+    window.setTimeout(() => {
+      state.suppressTranscriptScrollEvent = false;
+    }, 220);
+  }
+
+  function focusCurrentCueAndEnableAutoScroll(showStatus = true) {
+    if (!state.cues.length) {
+      updateFocusButtonState();
+      return;
+    }
+
+    const globalMs = getGlobalTimeMs();
+    const idx = getActiveCueIndex(globalMs);
+    state.autoScrollEnabled = true;
+    renderTranscript(globalMs, idx);
+    focusCueByIndex(idx, "smooth");
+    state.lastAutoScrolledCueIndex = idx;
+    updateFocusButtonState();
+
+    if (showStatus) {
+      setStatus("현재 자막에 포커스했고 자동 스크롤을 다시 켰습니다.");
+    }
+  }
+
   function renderTranscript(globalMs = null, forcedActiveIndex = -1) {
     if (!state.cues.length) {
       transcriptEl.textContent = "대본이 없습니다.";
+      updateFocusButtonState();
       return;
     }
 
@@ -417,6 +477,7 @@
 
       return `<div class="${classes}" data-cue-index="${idx}"${styleAttr}>${speakerHtml}<span class="txt">${label.text}</span></div>`;
     }).join("");
+    updateFocusButtonState();
   }
 
   async function completeAndPoll() {
@@ -431,6 +492,7 @@
         const rs = await api(`/api/stt/meetings/${state.meetingId}/snapshot?poll=true`);
         state.chunkOrder = (rs.chunks || []).map(c => c.chunkSeq).sort((a, b) => a - b);
         state.cues = (rs.cues || []).slice().sort((a, b) => a.startMs - b.startMs);
+        state.lastAutoScrolledCueIndex = -1;
         renderTranscript(state.playing ? getGlobalTimeMs() : null);
 
         setStatus(`대본 생성 확인 중... (${i}/${state.maxPoll}) ${rs.status}`);
@@ -467,7 +529,13 @@
     }
 
     state.playing = true;
-    renderTranscript(getGlobalTimeMs());
+    const globalMs = getGlobalTimeMs();
+    const idx = getActiveCueIndex(globalMs);
+    renderTranscript(globalMs);
+    if (state.autoScrollEnabled) {
+      focusCueByIndex(idx, "smooth");
+      state.lastAutoScrolledCueIndex = idx;
+    }
     if (!playerEl.src) {
       setStatus("병합 오디오가 준비되지 않았습니다. 종료 버튼을 다시 눌러주세요.");
       state.playing = false;
@@ -480,6 +548,11 @@
     if (!state.playing) return;
     const globalMs = getGlobalTimeMs();
     renderTranscript(globalMs);
+    const activeIdx = getActiveCueIndex(globalMs);
+    if (state.autoScrollEnabled && activeIdx !== state.lastAutoScrolledCueIndex) {
+      focusCueByIndex(activeIdx, "smooth");
+      state.lastAutoScrolledCueIndex = activeIdx;
+    }
   });
 
   playerEl.addEventListener("ended", () => {
@@ -490,10 +563,22 @@
   playerEl.addEventListener("pause", () => {
     renderTranscript(getGlobalTimeMs());
   });
+  playerEl.addEventListener("seeked", () => {
+    if (!state.cues.length) return;
+    focusCurrentCueAndEnableAutoScroll(true);
+  });
   playerEl.addEventListener("play", () => {
     if (!state.playing) {
       startPlaybackByAudioControl();
     }
+  });
+
+  transcriptEl.addEventListener("scroll", () => {
+    if (state.suppressTranscriptScrollEvent) return;
+    if (!state.autoScrollEnabled) return;
+    state.autoScrollEnabled = false;
+    updateFocusButtonState();
+    setStatus("수동 스크롤 상태입니다. 현재 자막 포커스 버튼을 누르면 자동 스크롤이 다시 켜집니다.");
   });
 
   // 대본 문구 클릭 시 해당 구간으로 즉시 이동/재생
@@ -511,13 +596,19 @@
 
     playerEl.currentTime = cue.startMs / 1000;
     state.playing = true;
+    state.autoScrollEnabled = true;
     renderTranscript(cue.startMs, idx);
+    focusCueByIndex(idx, "smooth");
+    state.lastAutoScrolledCueIndex = idx;
+    updateFocusButtonState();
     playerEl.play().catch(() => {});
     setStatus("재생 중... 클릭한 대본 구간으로 이동했습니다.");
   });
 
   $("uploadBtn").addEventListener("click", uploadFiles);
   $("completeBtn").addEventListener("click", completeAndPoll);
+  focusBtn.addEventListener("click", () => focusCurrentCueAndEnableAutoScroll(true));
+  updateFocusButtonState();
 </script>
 </body>
 </html>
